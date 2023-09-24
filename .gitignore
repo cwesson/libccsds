@@ -1,0 +1,5 @@
+bin/
+doc/html/
+doc/bib*
+doc/citelist*
+.vscode/
