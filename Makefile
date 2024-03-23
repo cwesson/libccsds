@@ -13,9 +13,14 @@ UTLDARGS := -pthread
 UTSRCS := $(SRCS) $(shell ls test/*.cpp)
 UTOBJS := $(addsuffix .o,$(addprefix bin/ut/,$(basename $(UTSRCS))))
 UTDEPS := $(UTOBJS:%.o=%.d)
+UTARGS := -c -v -ojunit
 
 -include $(DEPS)
 -include $(UTDEPS)
+
+.PHONY: all test unittest clean realclean
+
+all: test
 
 test: unittest
 
@@ -23,6 +28,7 @@ unittest: $(UTBIN)
 
 $(UTBIN): $(UTOBJS) $(CPPUTESTLIB)
 	$(LD) $(UTLDARGS) -o $@ $^
+	$(UTBIN) $(UTARGS)
 
 bin/ut/%.o: %.cpp
 	@mkdir -p $(dir $@)
@@ -33,6 +39,8 @@ cpputest: $(CPPUTESTLIB)
 $(CPPUTESTLIB):
 	cd test/cpputest; cmake .
 	make -C test/cpputest
+
+.NOTPARALLEL:
 
 clean:
 	rm -rf $(OBJS) $(DEPS) $(UTOBJS) $(UTDEPS)

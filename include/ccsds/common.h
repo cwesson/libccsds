@@ -12,6 +12,50 @@ namespace ccsds {
  */
 
 /**
+ * Error codes used in libccsds.
+ */
+class error {
+    public:
+        /**
+         * Error codes.
+         */
+        enum code {
+            NONE = 0,    ///< No error.
+            NO_SUPPORT,  ///< Function not supported.
+            NO_NETWORK,  ///< Network unavailable.
+        };
+
+        /**
+         * Constructor.
+         * @param v Error code.
+         */
+        error(code v = NONE) :
+            value(v)
+        {}
+
+        /**
+         * int conversion.
+         * @return Error code.
+         */
+        operator int()
+        {
+            return value;
+        }
+
+        /**
+         * enum conversion.
+         * @return Error code.
+         */
+        operator enum code()
+        {
+            return value;
+        }
+
+    private:
+        code value;  ///< Error code.
+};
+
+/**
  * Generic zero-copy buffer for SDU.
  */
 class base_sdu {
@@ -20,7 +64,7 @@ class base_sdu {
          * Constructor.
          */
         base_sdu() :
-            next(nullptr)
+            ptr(nullptr)
         {}
 
         /**
@@ -35,6 +79,32 @@ class base_sdu {
         virtual size_t size() const = 0;
 
         /**
+         * Get the total size of all the buffers in bytes.
+         * @return Buffer size in bytes.
+         */
+        size_t totalSize() const
+        {
+            if(ptr){
+                return size() + ptr->size();
+            }else{
+                return size();
+            }
+        }
+
+        /**
+         * Get the number of chained buffers,
+         * @return number of buffers.
+         */
+        size_t length() const
+        {
+            if(ptr){
+                return ptr->length() + 1;
+            }else{
+                return 1;
+            }
+        }
+
+        /**
          * Access the buffer.
          * @return Pointer to the buffer.
          */
@@ -46,11 +116,20 @@ class base_sdu {
          */
         void append(std::unique_ptr<const base_sdu> sdu)
         {
-            next.swap(sdu);
+            ptr.swap(sdu);
+        }
+
+        /**
+         * Get the next buffer in the chain.
+         * @return The next buffer.
+         */
+        const base_sdu& next() const
+        {
+            return *ptr;
         }
     
     private:
-        std::unique_ptr<const base_sdu> next; ///< Link list of SDU.
+        std::unique_ptr<const base_sdu> ptr; ///< Link list of SDU.
 };
 
 /**
@@ -175,9 +254,30 @@ class base_service {
         /**
          * Transfer an SDU from another service.
          * @param sdu SDU to transfer.
+         * @retval error::code::NONE if successful.
+         * @retval other if failure.
          */
-        virtual void transfer(std::unique_ptr<const base_sdu> sdu) = 0;
+        virtual ccsds::error transfer(std::unique_ptr<const base_sdu> sdu) = 0;
 };
+
+#if (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+    /**
+     * Convert uint16 to big endian.
+     * @param x Little endian uint16.
+     * @return Big endian uint16.
+     */
+    inline uint16_t htons(uint16_t x)
+    {
+        return ((x & 0xFF) << 8) | ((x >> 8) & 0xFF);
+    }
+#elif (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    inline uint16_t htons(uint16_t x)
+    {
+        return x;
+    }
+#else
+    #error "Unknown endian"
+#endif
 
 /** @} */ // group ccsds
 } // namespace ccsds

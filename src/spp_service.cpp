@@ -4,7 +4,6 @@
  */
 
 #include "ccsds/spp.h"
-#include <arpa/inet.h>
 
 namespace ccsds {
 namespace spp {
@@ -29,17 +28,23 @@ octet_service::octet_service(apid id, ccsds::base_service* subnetwork) :
 
 }
 
-void octet_service::request(std::unique_ptr<const ccsds::base_sdu> packet, bool secondary, packet_type type)
+ccsds::error octet_service::request(std::unique_ptr<const ccsds::base_sdu> packet, bool secondary, packet_type type)
 {
     auto sdu = assembly(std::move(packet), id, secondary, type);
-    service.transfer(std::move(sdu));
+    return service.transfer(std::move(sdu));
+}
+
+ccsds::error octet_service::request(std::unique_ptr<const ccsds::base_sdu> packet, bool secondary, uint16_t name)
+{
+    auto sdu = assembly(std::move(packet), id, secondary, name);
+    return service.transfer(std::move(sdu));
 }
 
 /**
  * Primary header identification assembly helpers.
  */
 enum {
-    PACKET_VERSION       = 0b000, ///< Packet version number.
+    PACKET_VERSION_1     = 0b000, ///< Packet version number.
     PACKET_VERSION_SHIFT = 13,    ///< Packet version shift in identification field.
     PACKET_TYPE_MASK     = 0x1,   ///< Packet type mask in identification field.
     PACKET_TYPE_SHIFT    = 12,    ///< Packet type shift in identification field.
@@ -60,17 +65,17 @@ std::unique_ptr<const ccsds::sdu<ccsds::spp::primary_header>> octet_service::ass
 {
     std::unique_ptr<ccsds::sdu<ccsds::spp::primary_header>> header = std::make_unique<ccsds::sdu<ccsds::spp::primary_header>>();
 
-    (*header)->identification = htons(
-            (PACKET_VERSION << PACKET_VERSION_SHIFT)           // packet version number
+    (*header)->identification = ccsds::htons(
+            (PACKET_VERSION_1 << PACKET_VERSION_SHIFT)         // packet version number
             | ((type & PACKET_TYPE_MASK) << PACKET_TYPE_SHIFT) // packet type
             | ((!!secondary) << PACKET_SEC_HDR_SHIFT)          // secondary header flag
             | (id & PACKET_APID_MASK));                        // APID
 
-    (*header)->sequence_control = htons(
+    (*header)->sequence_control = ccsds::htons(
             (SEQUENCE_UNSEGMENTED << SEQUENCE_FLAGS_SHIFT) // sequence flags
             | (packet_count++ & SEQUENCE_COUNT_MASK));     // packet sequence count
 
-    (*header)->data_length = htons(packet->size() - 1);
+    (*header)->data_length = ccsds::htons(packet->totalSize() - 1);
 
     // Attach the header to the packet
     header->append(std::move(packet));
@@ -78,16 +83,41 @@ std::unique_ptr<const ccsds::sdu<ccsds::spp::primary_header>> octet_service::ass
     return header;
 }
 
-void packet_service::transfer(std::unique_ptr<const ccsds::base_sdu> sdu)
+std::unique_ptr<const ccsds::sdu<ccsds::spp::primary_header>> octet_service::assembly(std::unique_ptr<const ccsds::base_sdu> packet, apid id, bool secondary, uint16_t name)
+{
+    std::unique_ptr<ccsds::sdu<ccsds::spp::primary_header>> header = std::make_unique<ccsds::sdu<ccsds::spp::primary_header>>();
+
+    (*header)->identification = ccsds::htons(
+            (PACKET_VERSION_1 << PACKET_VERSION_SHIFT)         // packet version number
+            | ((TELECOMMAND & PACKET_TYPE_MASK) << PACKET_TYPE_SHIFT) // packet type
+            | ((!!secondary) << PACKET_SEC_HDR_SHIFT)          // secondary header flag
+            | (id & PACKET_APID_MASK));                        // APID
+
+    (*header)->sequence_control = ccsds::htons(
+            (SEQUENCE_UNSEGMENTED << SEQUENCE_FLAGS_SHIFT) // sequence flags
+            | (name & SEQUENCE_COUNT_MASK));     // packet sequence count
+
+    (*header)->data_length = ccsds::htons(packet->totalSize() - 1);
+
+    // Attach the header to the packet
+    header->append(std::move(packet));
+
+    return header;
+}
+
+ccsds::error packet_service::transfer(std::unique_ptr<const ccsds::base_sdu> sdu)
 {
     if(subnetwork != nullptr){
-        subnetwork->transfer(std::move(sdu));
+        return subnetwork->transfer(std::move(sdu));
+    }else{
+        return error(error::code::NO_NETWORK);
     }
 }
 
-void octet_service::transfer(std::unique_ptr<const ccsds::base_sdu> sdu)
+ccsds::error octet_service::transfer(std::unique_ptr<const ccsds::base_sdu> sdu)
 {
     (void)sdu;
+    return error(error::code::NO_SUPPORT);
 }
 
 /** @} */ // group spp
