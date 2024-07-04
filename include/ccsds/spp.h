@@ -44,7 +44,6 @@ static_assert(sizeof(primary_header) == 6);
 
 /**
  * Space Packet.
- * @requirement SPP-14
  */
 struct space_packet {
     primary_header header;      ///< Packet primary header.
@@ -52,6 +51,12 @@ struct space_packet {
 };
 
 static_assert(sizeof(space_packet) == 6);
+
+/**
+ * Space Packet Protocol Data Unit (PDU).
+ * @requirement SPP-14
+ */
+typedef ccsds::du<ccsds::spp::space_packet> pdu;
 
 /**
  * Application Protocol Identifier (APID)
@@ -87,17 +92,15 @@ class packet_service : public ccsds::base_service {
         virtual ~packet_service() = default;
 
         /**
-         * Send a pre-formated space packet.
+         * Send a pre-formatted space packet.
          * @requirement SPP-10
-         * @param packet Packet to send.
-         * @param id APID of the packet.
-         * @requirement SPP-3
+         * @param pdu PDU to send.
          * @param qos Quality of Service requirement.
          * @requirement SPP-5
          * @retval error::code::NONE if successful.
          * @retval other from the subnetwork.
          */
-        ccsds::error request(std::unique_ptr<const ccsds::sdu<ccsds::spp::primary_header>> packet, apid id, int qos = 0);
+        ccsds::error request(std::unique_ptr<const ccsds::spp::pdu> pdu, int qos = 0);
 
         /**
          * Callback function for receiving an octet string.
@@ -108,13 +111,13 @@ class packet_service : public ccsds::base_service {
          * @param packet_loss Packet Loss Indicator.
          * @requirement SPP-4
          */
-        typedef void (*indication)(ccsds::sdu<ccsds::spp::primary_header> *packet, apid id, bool packet_loss);
+        typedef void (*indication)(std::unique_ptr<const ccsds::spp::pdu> pdu, apid id, bool packet_loss);
 
         /**
          * Set the indication callback function.
          * @param func Callback function.
          */
-        void set_indication(indication* func);
+        void set_indication(indication func);
 
         /**
          * Transfer an SDU from another service.
@@ -123,11 +126,18 @@ class packet_service : public ccsds::base_service {
          * @retval error::code::NO_NETWORK if a subnetwork has not been configured.
          * @retval other from the subnetwork.
          */
-        virtual ccsds::error transfer(std::unique_ptr<const ccsds::base_sdu> sdu) override;
+        virtual ccsds::error transfer(std::unique_ptr<const ccsds::base_du> sdu) override;
+
+        /**
+         * Receive a PDU from the subnetwork.
+         * @param pdu PDU to receive.
+         */
+        void reception(std::unique_ptr<const ccsds::spp::pdu> pdu);
 
     private:
         ccsds::base_service* subnetwork; ///< Subnetwork to transmit packets on.
-        indication*          callback;   ///< Indication callback function.
+        indication           callback;   ///< Indication callback function.
+        uint16_t             last_count;  ///< Tracker of last seen count.
 };
 
 /**
@@ -151,7 +161,7 @@ class octet_service : public ccsds::base_service {
         /**
          * Send a space packet using a packet count with the given octet string.
          * @requirement SPP-12
-         * @param packet Packet to send.
+         * @param sdu SDU to send.
          * @requirement SPP-6
          * @param secondary Secondary header indicator.
          * @requirement SPP-8
@@ -159,12 +169,12 @@ class octet_service : public ccsds::base_service {
          * @retval error::code::NONE if successful.
          * @retval other from the subnetwork.
          */
-        ccsds::error request(std::unique_ptr<const ccsds::base_sdu> packet, bool secondary, packet_type type);
+        ccsds::error request(std::unique_ptr<const ccsds::base_du> sdu, bool secondary, packet_type type);
 
         /**
          * Send a space packet using a packet name with the given octet string.
          * @requirement SPP-12
-         * @param packet Packet to send.
+         * @param sdu SDU to send.
          * @requirement SPP-6
          * @param secondary Secondary header indicator.
          * @requirement SPP-8
@@ -172,69 +182,72 @@ class octet_service : public ccsds::base_service {
          * @retval error::code::NONE if successful.
          * @retval other from the subnetwork.
          */
-        ccsds::error request(std::unique_ptr<const ccsds::base_sdu> packet, bool secondary, uint16_t name);
+        ccsds::error request(std::unique_ptr<const ccsds::base_du> sdu, bool secondary, uint16_t name);
 
         /**
          * Callback function for receiving an octet string.
          * @requirement SPP-13
-         * @param packet Packet to send.
+         * @param sdu SDU received.
          * @param id APID of the packet.
          * @requirement SPP-7
          * @param data_loss data Loss Indicator.
          * @requirement SPP-9
          */
-        typedef void (*indication)(ccsds::base_sdu *packet, apid id, bool data_loss);
+        typedef void (*indication)(std::unique_ptr<const ccsds::base_du> sdu, apid id, bool data_loss);
 
         /**
          * Set the indication callback function.
          * @param func Callback function.
          */
-        void set_indication(indication* func);
+        void set_indication(indication func);
+
+        /**
+         * Receive a PDU from the subnetwork.
+         * @param pdu PDU to receive.
+         */
+        void reception(std::unique_ptr<ccsds::spp::pdu> pdu);
 
     private:
         /**
-         * Transfer an SDU from another service.
+         * Transfer as SDU from another service.
          * @warning The octet service does not allow direct transfers,
          * @requirement SPP-20
          * @param sdu SDU to transfer.
          * @retval error::code::NO_SUPPORT The octet service does not allow direct transfers,
          */
-        virtual ccsds::error transfer(std::unique_ptr<const ccsds::base_sdu> sdu) override;
+        virtual ccsds::error transfer(std::unique_ptr<const ccsds::base_du> sdu) override;
 
     protected:
         /**
          * Assemble a space packet with a packet count.
          * @requirement SPP-19
-         * @param packet Packet to send.
+         * @param sdu Packet to send.
          * @requirement SPP-6
-         * @param id APID of the packet.
-         * @requirement SPP-7
          * @param secondary Secondary header indicator.
          * @requirement SPP-8
          * @param type Packet type.
          * @return Newly assembled pace packet.
          */
-        std::unique_ptr<const ccsds::sdu<ccsds::spp::primary_header>> assembly(std::unique_ptr<const ccsds::base_sdu> packet, apid id, bool secondary, packet_type type);
+        std::unique_ptr<const ccsds::spp::pdu> assembly(std::unique_ptr<const ccsds::base_du> sdu, bool secondary, packet_type type);
 
         /**
          * Assemble a space packet with a packet name.
          * @requirement SPP-19
-         * @param packet Packet to send.
+         * @param sdu Packet to send.
          * @requirement SPP-6
-         * @param id APID of the packet.
-         * @requirement SPP-7
          * @param secondary Secondary header indicator.
          * @requirement SPP-8
          * @param name Packet name.
          * @return Newly assembled pace packet.
          */
-        std::unique_ptr<const ccsds::sdu<ccsds::spp::primary_header>> assembly(std::unique_ptr<const ccsds::base_sdu> packet, apid id, bool secondary, uint16_t name);
+        std::unique_ptr<const ccsds::spp::pdu> assembly(std::unique_ptr<const ccsds::base_du> sdu, bool secondary, uint16_t name);
 
     private:
         packet_service service;      ///< Underlying packet service
-        indication*    callback;     ///< Indication callback function.
+        indication     callback;     ///< Indication callback function.
         apid           id;           ///< APID for the service.
         uint16_t       packet_count; ///< Current packet count.
+        uint16_t       last_count;   ///< Tracker of last seen count.
 };
 
 #pragma pack(pop)
